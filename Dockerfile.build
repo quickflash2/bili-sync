@@ -9,17 +9,11 @@ WORKDIR /build/web
 # 设置 npm 镜像源为淘宝镜像，解决网络连接问题
 RUN npm config set registry https://registry.npmmirror.com
 
-# 项目主要使用 bun 作为包管理器，package-lock.json 可能不同步
-# 因此使用 npm install 而非 npm ci
-COPY web/package.json ./
-RUN npm install --legacy-peer-deps
-
-# npm 在 musl 平台下可选依赖安装有已知 bug，需显式安装 rollup 的 musl 平台包
-# 参见: https://github.com/npm/cli/issues/4828
-RUN npm install @rollup/rollup-linux-x64-musl --legacy-peer-deps --no-save || true
+COPY web/package.json web/bun.lock ./
+RUN npm install -g bun && bun install
 
 COPY web/ ./
-RUN npm run build
+RUN bun run build
 
 # ---- 阶段2: 编译 Rust 后端 ----
 FROM docker.m.daocloud.io/library/rust:1.97.0-alpine AS builder
