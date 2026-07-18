@@ -6,8 +6,10 @@ FROM docker.m.daocloud.io/library/node:22-alpine AS frontend
 
 WORKDIR /build/web
 
-COPY web/package.json web/package-lock.json ./
-RUN npm ci --legacy-peer-deps
+# 项目主要使用 bun 作为包管理器，package-lock.json 可能不同步
+# 因此使用 npm install 而非 npm ci，确保在 musl 平台正确安装可选依赖
+COPY web/package.json ./
+RUN npm install --legacy-peer-deps
 
 COPY web/ ./
 RUN npm run build
