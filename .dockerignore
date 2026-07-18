@@ -1,0 +1,13 @@
+**/node_modules
+**/target
+**/build
+*.log
+*.tar
+auth_data
+*.sqlite*
+debug*
+docs/.vitepress/cache
+docs/.vitepress/dist
+config/
+.git
+.github
