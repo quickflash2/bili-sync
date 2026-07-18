@@ -25,7 +25,8 @@ RUN npm run build
 FROM docker.m.daocloud.io/library/rust:1.97.0-alpine AS builder
 
 # 设置 cargo 镜像源为国内镜像，解决网络连接问题
-RUN echo '[source.crates-io]' > /root/.cargo/config.toml && \
+RUN mkdir -p /root/.cargo && \
+    echo '[source.crates-io]' > /root/.cargo/config.toml && \
     echo 'replace-with = "rustcc"' >> /root/.cargo/config.toml && \
     echo '[source.rustcc]' >> /root/.cargo/config.toml && \
     echo 'registry = "https://rsproxy.cn/crates.io-index"' >> /root/.cargo/config.toml
