@@ -3,16 +3,19 @@
 	import { goto } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import { Button } from '$lib/components/ui/button/index.js';
+	import * as Dialog from '$lib/components/ui/dialog/index.js';
 	import api from '$lib/api';
 	import SquareArrowOutUpRightIcon from '@lucide/svelte/icons/square-arrow-out-up-right';
 	import type { ApiError, VideoResponse, UpdateVideoStatusRequest } from '$lib/types';
 	import BrushCleaningIcon from '@lucide/svelte/icons/brush-cleaning';
 	import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw';
 	import SquarePenIcon from '@lucide/svelte/icons/square-pen';
+	import PlayIcon from '@lucide/svelte/icons/play';
 	import { setBreadcrumb } from '$lib/stores/breadcrumb';
 	import { appStateStore, ToQuery } from '$lib/stores/filter';
 	import VideoCard from '$lib/components/video-card.svelte';
 	import StatusEditor from '$lib/components/status-editor.svelte';
+	import VideoPlayer from '$lib/components/video-player.svelte';
 	import { toast } from 'svelte-sonner';
 
 	let videoData: VideoResponse | null = null;
@@ -24,6 +27,25 @@
 	let clearAndResetting = false;
 	let statusEditorOpen = false;
 	let statusEditorLoading = false;
+
+	// 视频播放器相关状态
+	let playerDialogOpen = false;
+	let playerVideoId = 0;
+	let playerPageId = 0;
+	let playerTitle = '';
+
+	// 判断分页的视频内容是否已下载完成（视频内容子任务状态为 STATUS_OK = 7）
+	function isVideoContentDownloaded(downloadStatus: number[]): boolean {
+		return downloadStatus[1] === 7;
+	}
+
+	// 打开视频播放器
+	function openPlayer(videoId: number, pageId: number, title: string) {
+		playerVideoId = videoId;
+		playerPageId = pageId;
+		playerTitle = title;
+		playerDialogOpen = true;
+	}
 
 	async function loadVideoDetail() {
 		const videoId = parseInt($page.params.id!);
@@ -243,21 +265,35 @@
 					style="grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));"
 				>
 					{#each videoData.pages as pageInfo (pageInfo.id)}
-						<VideoCard
-							video={{
-								id: pageInfo.id,
-								name: `P${pageInfo.pid}: ${pageInfo.name}`,
-								upper_name: '',
-								download_status: pageInfo.download_status,
-								should_download: videoData.video.should_download,
-								valid: videoData.video.valid
-							}}
-							mode="page"
-							showActions={false}
-							customTitle="P{pageInfo.pid}: {pageInfo.name}"
-							customSubtitle=""
-							taskNames={['视频封面', '视频内容', '视频信息', '视频弹幕', '视频字幕']}
-						/>
+						<div class="relative">
+							<VideoCard
+								video={{
+									id: pageInfo.id,
+									name: `P${pageInfo.pid}: ${pageInfo.name}`,
+									upper_name: '',
+									download_status: pageInfo.download_status,
+									should_download: videoData.video.should_download,
+									valid: videoData.video.valid
+								}}
+								mode="page"
+								showActions={false}
+								customTitle="P{pageInfo.pid}: {pageInfo.name}"
+								customSubtitle=""
+								taskNames={['视频封面', '视频内容', '视频信息', '视频弹幕', '视频字幕']}
+							/>
+							{#if isVideoContentDownloaded(pageInfo.download_status)}
+								<Button
+									size="sm"
+									variant="secondary"
+									class="absolute right-2 top-2 shrink-0 cursor-pointer"
+									onclick={() =>
+										openPlayer(videoData.video.id, pageInfo.id, `P${pageInfo.pid}: ${pageInfo.name}`)}
+								>
+									<PlayIcon class="mr-1 h-4 w-4" />
+									播放
+								</Button>
+							{/if}
+						</div>
 					{/each}
 				</div>
 			</div>
@@ -281,3 +317,18 @@
 		/>
 	{/if}
 {/if}
+
+<!-- 视频播放器对话框 -->
+<Dialog.Root bind:open={playerDialogOpen}>
+	<Dialog.Content class="max-w-[90vw]! lg:max-w-[80vw]!">
+		<Dialog.Header>
+			<Dialog.Title>{playerTitle}</Dialog.Title>
+			<Dialog.Description class="sr-only">视频播放器</Dialog.Description>
+		</Dialog.Header>
+		<div class="mt-2">
+			{#if playerDialogOpen}
+				<VideoPlayer videoId={playerVideoId} pageId={playerPageId} />
+			{/if}
+		</div>
+	</Dialog.Content>
+</Dialog.Root>

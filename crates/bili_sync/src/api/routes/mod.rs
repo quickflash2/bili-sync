@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use axum::extract::Request;
 use axum::http::HeaderMap;
 use axum::middleware::Next;
@@ -44,6 +46,15 @@ pub async fn auth(mut headers: HeaderMap, request: Request, next: Next) -> Resul
         .get("Authorization")
         .and_then(|v| v.to_str().ok())
         .is_some_and(|s| s == token)
+    {
+        return Ok(next.run(request).await);
+    }
+    // 允许通过 query 参数 `?token=xxx` 进行认证，主要用于 <video> 标签无法设置自定义请求头的场景
+    // 注意：必须对值进行 URL 解码，因为前端会使用 encodeURIComponent 编码 token
+    // （token 可能包含 #、= 等在 URL 中有特殊含义的字符）
+    if let Some(query) = request.uri().query()
+        && let Ok(params) = serde_urlencoded::from_str::<HashMap<String, String>>(query)
+        && params.get("token").is_some_and(|t| t == token)
     {
         return Ok(next.run(request).await);
     }

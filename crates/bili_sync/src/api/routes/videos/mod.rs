@@ -1,7 +1,10 @@
 use std::collections::HashSet;
 
 use anyhow::{Context, Result};
+use axum::body::Body;
 use axum::extract::{Extension, Path, Query};
+use axum::http::{header, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use bili_sync_entity::*;
@@ -10,6 +13,9 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
     QueryOrder, TransactionTrait, TryIntoModel,
 };
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
+use tokio_util::io::ReaderStream;
 
 use crate::api::error::InnerApiError;
 use crate::api::helper::{update_page_download_status, update_video_download_status};
@@ -23,7 +29,7 @@ use crate::api::response::{
     VideosResponse,
 };
 use crate::api::wrapper::{ApiError, ApiResponse, ValidatedJson};
-use crate::utils::status::{PageStatus, VideoStatus};
+use crate::utils::status::{PageStatus, STATUS_OK, VideoStatus};
 
 pub(super) fn router() -> Router {
     Router::new()
@@ -37,6 +43,7 @@ pub(super) fn router() -> Router {
         .route("/videos/{id}/update-status", post(update_video_status))
         .route("/videos/reset-status", post(reset_filtered_video_status))
         .route("/videos/update-status", post(update_filtered_video_status))
+        .route("/videos/{video_id}/pages/{page_id}/stream", get(stream_page_video))
 }
 
 /// 列出视频的基本信息，支持根据视频来源筛选、名称查找和分页
@@ -416,4 +423,96 @@ pub async fn update_filtered_video_status(
         updated_videos_count: all_videos.len(),
         updated_pages_count: all_pages.len(),
     }))
+}
+
+/// 流式播放某个分页的视频文件，支持 HTTP Range 请求以便浏览器内播放器进行拖动进度条
+pub async fn stream_page_video(
+    Path((video_id, page_id)): Path<(i32, i32)>,
+    Extension(db): Extension<DatabaseConnection>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    let page_model = page::Entity::find()
+        .filter(page::Column::Id.eq(page_id))
+        .filter(page::Column::VideoId.eq(video_id))
+        .one(&db)
+        .await?
+        .ok_or_else(|| InnerApiError::NotFound(page_id))?;
+    // 校验视频内容子任务已完成
+    let page_status = PageStatus::from(page_model.download_status);
+    let status_array: [u32; 5] = page_status.into();
+    if status_array[1] != STATUS_OK {
+        return Err(InnerApiError::BadRequest("视频内容尚未下载完成".to_string()).into());
+    }
+    let video_path = page_model
+        .path
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| InnerApiError::NotFound(page_id))?;
+    let file_metadata = tokio::fs::metadata(&video_path)
+        .await
+        .with_context(|| format!("获取视频文件信息失败：{}", video_path))?;
+    let file_size = file_metadata.len();
+    let file = File::open(&video_path)
+        .await
+        .with_context(|| format!("打开视频文件失败：{}", video_path))?;
+    // 处理 Range 请求
+    if let Some(range_header) = headers.get(header::RANGE).and_then(|v| v.to_str().ok())
+        && let Some((start, end)) = parse_range(range_header, file_size)
+    {
+        let content_length = end - start + 1;
+        let mut file = file;
+        file.seek(SeekFrom::Start(start))
+            .await
+            .context("seek video file failed")?;
+        let stream = ReaderStream::new(file.take(content_length));
+        let body = Body::from_stream(stream);
+        return Ok((
+            StatusCode::PARTIAL_CONTENT,
+            [
+                (header::CONTENT_TYPE, HeaderValue::from_static("video/mp4")),
+                (
+                    header::CONTENT_LENGTH,
+                    HeaderValue::from_str(&content_length.to_string()).unwrap(),
+                ),
+                (
+                    header::CONTENT_RANGE,
+                    HeaderValue::from_str(&format!("bytes {}-{}/{}", start, end, file_size)).unwrap(),
+                ),
+                (header::ACCEPT_RANGES, HeaderValue::from_static("bytes")),
+            ],
+            body,
+        )
+            .into_response());
+    }
+    // 无 Range 头：返回整个文件
+    let stream = ReaderStream::new(file);
+    let body = Body::from_stream(stream);
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, HeaderValue::from_static("video/mp4")),
+            (
+                header::CONTENT_LENGTH,
+                HeaderValue::from_str(&file_size.to_string()).unwrap(),
+            ),
+            (header::ACCEPT_RANGES, HeaderValue::from_static("bytes")),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// 解析 HTTP Range 头，仅支持 bytes=start-end 或 bytes=start- 形式
+fn parse_range(range_header: &str, file_size: u64) -> Option<(u64, u64)> {
+    let range = range_header.strip_prefix("bytes=")?;
+    let (start_str, end_str) = range.split_once('-')?;
+    let start: u64 = start_str.parse().ok()?;
+    let end: u64 = if end_str.is_empty() {
+        file_size - 1
+    } else {
+        end_str.parse().ok()?
+    };
+    if start > end || start >= file_size {
+        return None;
+    }
+    Some((start, end.min(file_size - 1)))
 }

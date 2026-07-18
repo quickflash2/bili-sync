@@ -1,0 +1,24 @@
+services:
+
+  bili-sync-rs:
+    image: bili-sync-rs-local
+    build:
+      context: .
+      dockerfile: Dockerfile.build
+    restart: unless-stopped
+    network_mode: bridge
+    # 该选项请仅在日志终端支持彩色输出时启用，否则日志中可能会出现乱码
+    # tty: false
+    # 非必需设置项，推荐设置为宿主机用户的 uid 及 gid (`$uid:$gid`)
+    # 可以执行 `id ${user}` 获取 `user` 用户的 uid 及 gid
+    # 程序下载的所有文件权限将与此处的用户保持一致，不设置默认为 Root
+    # user: 1000:1000
+    container_name: bili-sync-rs
+    # 程序默认绑定 0.0.0.0:12345 运行 http 服务
+    ports:
+      - 12345:12345
+    volumes:
+      - ./config:/app/.config/bili-sync
+      # 容器内挂载路径必须为 /home/downloads，以匹配数据库中记录的文件路径
+      - /volume3/CloudNAS/bili:/home/downloads
+      - /volume2/@appdata/Jellyfin/data/metadata/people:/app/.config/bili-sync/upper_face

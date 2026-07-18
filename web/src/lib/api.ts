@@ -69,6 +69,12 @@ class ApiClient {
 		return this.defaultHeaders['Authorization'] || localStorage.getItem('authToken');
 	}
 
+	// 构造视频流的播放地址，使用 query 参数携带 token 以便 <video> 标签可以直接播放
+	getVideoStreamUrl(videoId: number, pageId: number): string {
+		const token = this.getAuthToken() || '';
+		return `${this.baseURL}/videos/${videoId}/pages/${pageId}/stream?token=${encodeURIComponent(token)}`;
+	}
+
 	// 清除认证 token
 	clearAuthToken() {
 		delete this.defaultHeaders['Authorization'];

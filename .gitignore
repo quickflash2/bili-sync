@@ -5,3 +5,7 @@ debug*
 node_modules
 docs/.vitepress/cache
 docs/.vitepress/dist
+# 本地构建/部署产生的临时文件
+build.log
+bili-sync-rs-local.tar
+config/

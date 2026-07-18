@@ -1,0 +1,59 @@
+# 多阶段构建：从源码编译 bili-sync
+# 用法: docker build -f Dockerfile.build -t bili-sync-rs-local .
+
+# ---- 阶段1: 构建前端 ----
+FROM docker.m.daocloud.io/library/node:22-alpine AS frontend
+
+WORKDIR /build/web
+
+RUN npm install -g bun
+
+COPY web/package.json web/bun.lock ./
+RUN bun install --frozen-lockfile
+
+COPY web/ ./
+RUN bun run build
+
+# ---- 阶段2: 编译 Rust 后端 ----
+FROM docker.m.daocloud.io/library/rust:1.94.0-alpine AS builder
+
+RUN apk update && apk add --no-cache \
+    musl-dev \
+    git \
+    clang \
+    llvm \
+    sqlite-dev
+
+ENV RUSTFLAGS="-C target-feature=-crt-static"
+
+WORKDIR /build
+
+# 拷贝完整源码与前端产物
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
+COPY --from=frontend /build/web/build/ web/build/
+
+RUN cargo build --release -p bili_sync
+
+# ---- 阶段3: 最小运行时镜像 ----
+FROM docker.m.daocloud.io/library/alpine:3.21 AS runtime
+
+RUN apk update && apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    ffmpeg \
+    sqlite-libs
+
+WORKDIR /app
+
+COPY --from=builder /build/target/release/bili-sync-rs ./
+
+ENV LANG=zh_CN.UTF-8 \
+    TZ=Asia/Shanghai \
+    HOME=/app \
+    RUST_BACKTRACE=1 \
+    RUST_LOG=None,bili_sync=info
+
+ENTRYPOINT [ "/app/bili-sync-rs" ]
+
+VOLUME [ "/app/.config/bili-sync" ]
