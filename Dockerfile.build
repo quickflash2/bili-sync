@@ -6,6 +6,9 @@ FROM docker.m.daocloud.io/library/node:22-alpine AS frontend
 
 WORKDIR /build/web
 
+# 设置 npm 镜像源为淘宝镜像，解决网络连接问题
+RUN npm config set registry https://registry.npmmirror.com
+
 # 项目主要使用 bun 作为包管理器，package-lock.json 可能不同步
 # 因此使用 npm install 而非 npm ci
 COPY web/package.json ./
@@ -20,6 +23,15 @@ RUN npm run build
 
 # ---- 阶段2: 编译 Rust 后端 ----
 FROM docker.m.daocloud.io/library/rust:1.97.0-alpine AS builder
+
+# 设置 cargo 镜像源为国内镜像，解决网络连接问题
+RUN echo '[source.crates-io]' > /root/.cargo/config.toml && \
+    echo 'replace-with = "rustcc"' >> /root/.cargo/config.toml && \
+    echo '[source.rustcc]' >> /root/.cargo/config.toml && \
+    echo 'registry = "https://rsproxy.cn/crates.io-index"' >> /root/.cargo/config.toml
+
+# 设置 apk 镜像源为阿里云镜像，解决网络连接问题
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 
 RUN apk update && apk add --no-cache \
     musl-dev \
